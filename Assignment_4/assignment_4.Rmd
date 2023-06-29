@@ -1,0 +1,159 @@
+---
+title: "Assignment 4"
+author: "Elke Windschitl & Lewis White"
+date: "2023-05-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#Load packages ----
+library(sensitivity)
+library(tidyverse)
+library(lhs)
+library(purrr)
+library(here)
+library(kableExtra)
+```
+
+## Sensitivity Analysis with Latin Hyper Cube
+
+```{r}
+# Source our compute atmospheric conductance function
+source(here("Assignment_4", "Catm-1.R"))
+```
+
+## A: Use the Latin hypercube approach to generate parameter values for the 4 parameters
+
+```{r}
+# set a random seed to make things 'random'
+set.seed(1)
+
+# gather height, kd, k0, and v pararmeters
+pnames = c("v", "height", "k_d", "k_o")
+
+# how many parameters
+npar = length(pnames)
+# how many samples 
+nsample = 100
+
+#create quantile matrix for our parameters of interest
+parm_quant = randomLHS(nsample, npar)
+
+#add parameter names to quantiles
+colnames(parm_quant)=pnames
+```
+
+```{r}
+#turn the parameter metrix into a data frame
+parm = as.data.frame(matrix(nrow=nrow(parm_quant), ncol=ncol(parm_quant)))
+
+colnames(parm) = pnames
+
+
+
+
+#V ---- 
+parm[,"v"] = qnorm(parm_quant[,"v"], mean= 250, sd= 30) #transforms the estimated values of a parameter called "v" from a quantile scale to a NORMAL scale
+
+
+#HEIGHT ----
+parm[,"height"] = qunif(parm_quant[,"height"], min=9.5, max = 10.5) ##transforms the estimated values of a parameter called "v" from a quantile scale to a UNIFORM scale
+
+
+# k_d ----
+parm[,"k_d"] = qnorm(parm_quant[,"k_d"], mean = 0.7, sd = 0.7*0.01) #transforms the estimated values of a parameter called "v" from a quantile scale to a NORMAL scale
+
+
+# k_o ----
+parm[,"k_o"] = qnorm(parm_quant[,"k_o"],  mean = 0.1, sd = 0.1*0.01) #transforms the estimated values of a parameter called "v" from a quantile scale to a NORMAL scale
+
+
+head(parm) #parm contains data frame 
+```
+
+## B: Run the atmospheric conductance model for these parameters
+
+
+```{r}
+conductance = parm %>% pmap(Catm) #obtain list of conductance values in mm/s
+
+conductance_df <- data.frame(conductance = do.call("rbind", conductance)) #turn the list into a dataframe with 1 column
+```
+
+## C: Plot conductance estimates in a way that accounts for parameter uncertainty
+
+```{r}
+#create histogram of conductance estimates with corresponding boxplot above. 
+ggplot(conductance_df, aes(x = conductance, fill = "Conductance")) +
+  geom_histogram(color = "black", fill = "#BBE0BE") +
+  geom_boxplot(aes(x = conductance), fill = "#AFC437", color = "black", width = 0.2, alpha = 0.8,
+               position = position_nudge(y = 12), # move box plot up
+               outlier.shape = NA) + # remove outliers to avoid overlap
+  labs(x = "Conductance", 
+       y = "Frequency", 
+       title = "Distribution of Conductance Estimates",
+       fill = NULL) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  coord_cartesian(ylim = c(0, max(table(conductance_df$conductance)) + 11)) # adjust y axis limit
+
+```
+ 
+# D: Plot conductance estimates against each of your parameters
+
+```{r}
+# plot parameter sensitivity
+
+#add parameter values to conductance estimates
+conductance_with_params = cbind.data.frame(conductance_df, parm)
+
+#adjust dataframe so the parameter is its own column. Better for plotting. 
+conductance_with_params_2 = conductance_with_params %>% gather(-conductance, key="parm", value="parmvalue")
+
+#plot conductance estimate for the range of parameters values for each param 
+ggplot(conductance_with_params_2, aes(x = parmvalue, y = conductance)) +
+  geom_point() + 
+  facet_wrap(~parm, scales="free", ncol=4) +
+  theme_bw() +
+  labs(x = "Parameter Value",
+       y = "Conductance (mm/s)",
+       title = "Wind Speed has the Greatest Effect on Conductance")
+
+```
+
+
+# E: Estimate the Partial Rank Correlation Coefficients
+
+```{r}
+#NON RANKED COEFFICIENTS ~ uncomment if interested in the non-ranked version
+# combine parameter sets with output
+
+# senresult = pcc(parm, conductance_df$conductance)
+# 
+# # see coefficients
+# senresult
+# 
+# # efficiently plot them
+# plot(senresult, main = "Partial Correlation Coefficient Plot") #it looks like you can't change the title when plotting something of class pcc
+
+
+
+# RANKED COEFFICIENTS 
+
+senresult_rank = pcc(parm, conductance_df$conductance, rank=TRUE) #partial rank coefs more valuable
+
+#see coefficients 
+senresult_rank
+
+#plot resilts 
+plot(senresult_rank)
+
+```
+
+## F: Discuss what your results tell you about how aerodynamic conductance? What does it suggest about what you should focus on if you want to reduce uncertainty in aerodymaic conductance estimates? Does this tell you anything about the sensitivity of plant water use to climate change?
+
+**The results indicate that the wind speed is a crucial component in determining how easily vapor diffuses from vegetation surfaces. The wind speed and the vegetation height both appear to be strongly associated with atmospheric conductance levels. Thus, if you want to reduce uncertainty in aerodynamic conductance estimates, it would be important to ensure that a precise and accurate prediction/observation of the wind speed (and vegetation height) is obtained.**
+
+**As wind is not likely to increase dramatically due to climate change in California, the sensitivity of plant water use should not be greatly impacted. However, in areas that do experience an increase in wind due to climate change (such as the central US), plants may cycle water more quickly. This could lead to an increased need for irrigation and bring other challenges to many agriculture heavy states.**
+
